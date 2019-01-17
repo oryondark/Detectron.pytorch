@@ -27,7 +27,7 @@ import nn as mynn
 from core.config import cfg, cfg_from_file, cfg_from_list, assert_and_infer_cfg
 from core.test import im_detect_all
 from modeling.model_builder import Generalized_RCNN
-import datasets.dummy_datasets as datasets
+import datasets.dummy_datasets as datasets # For feature extractor library
 import utils.misc as misc_utils
 import utils.net as net_utils
 import utils.vis as vis_utils
@@ -93,11 +93,14 @@ def main():
     assert bool(args.image_dir) ^ bool(args.images)
 
     if args.dataset.startswith("coco"):
+        # For denote class for prediction.
         dataset = datasets.get_coco_dataset()
         cfg.MODEL.NUM_CLASSES = len(dataset.classes)
+        
     elif args.dataset.startswith("keypoints_coco"):
         dataset = datasets.get_coco_dataset()
         cfg.MODEL.NUM_CLASSES = 2
+        
     else:
         raise ValueError('Unexpected dataset name: {}'.format(args.dataset))
 
@@ -147,7 +150,7 @@ def main():
         timers = defaultdict(Timer)
 
         cls_boxes, cls_segms, cls_keyps = im_detect_all(maskRCNN, im, timers=timers)
-
+        #print(cls_boxes, cls_segms, cls_keyps)
         im_name, _ = os.path.splitext(os.path.basename(imglist[i]))
         vis_utils.vis_one_image(
             im[:, :, ::-1],  # BGR -> RGB for visualization
@@ -159,8 +162,9 @@ def main():
             dataset=dataset,
             box_alpha=0.3,
             show_class=True,
-            thresh=0.7,
-            kp_thresh=2
+            thresh=0.9, # threshold
+            kp_thresh=2,
+            ext='jpg'
         )
 
     if args.merge_pdfs and num_images > 1:

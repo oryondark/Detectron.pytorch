@@ -374,11 +374,16 @@ def main():
         args,
         args.disp_interval,
         tblogger if args.use_tfboard and not args.no_save else None)
+    
+    #This's for train.
     try:
         logger.info('Training starts !')
         step = args.start_step
-        for step in range(args.start_step, cfg.SOLVER.MAX_ITER):
-
+        #for step in range(args.start_step, cfg.SOLVER.MAX_ITER):
+        for step in range(0, 3000): # For leaky-learning.
+            # What is leaky learn?
+            # that is mean to small cycle learning.
+            
             # Warm up
             if step < cfg.SOLVER.WARM_UP_ITERS:
                 method = cfg.SOLVER.WARM_UP_METHOD

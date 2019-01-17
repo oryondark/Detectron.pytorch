@@ -104,24 +104,50 @@ def get_class_string(class_index, score, dataset):
     return class_text + ' {:0.2f}'.format(score).lstrip('0')
 
 
+'''
+im = image texture
+im_name = image file name
+output_dir = For save file in specific directory
+boxes = how does draw rectangle on this image.
+segms = want to segment this parameter set true, but if not false.
+keypoints = default true, but if not false.
+thresh =  threshold
+
+Note that you have to known the decectron will be maked pdf for output about input image.
+If you want to transform image foramt file, please modify 'ext' name pdf to jpg.
+'''
 def vis_one_image(
         im, im_name, output_dir, boxes, segms=None, keypoints=None, thresh=0.9,
         kp_thresh=2, dpi=200, box_alpha=0.0, dataset=None, show_class=False,
         ext='pdf'):
     """Visual debugging of detections."""
+    
+    crop_magnifier_list = []
+    mask_magnifier_list = []
+
+    #---------------Bbox Start---------------------------------#
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
-
+    
     if isinstance(boxes, list):
         boxes, segms, keypoints, classes = convert_from_cls_format(
             boxes, segms, keypoints)
-
+    
+    #Thresh_hold
+    print(max(boxes[:, 4]), thresh)
+    #boxes information
+    print(boxes)
+    #boxes shape
+    print(boxes.shape[0])
+    
     if boxes is None or boxes.shape[0] == 0 or max(boxes[:, 4]) < thresh:
         return
-
+    print("[VIS] Image annotation start!")
+    
     if segms is not None:
         masks = mask_util.decode(segms)
-
+    
+    
     color_list = colormap(rgb=True) / 255
 
     dataset_keypoints, _ = keypoint_utils.get_keypoints()
@@ -139,7 +165,8 @@ def vis_one_image(
     # Display in largest to smallest order to reduce occlusion
     areas = (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])
     sorted_inds = np.argsort(-areas)
-
+    output_name = os.path.basename(im_name) + '.' + ext
+    
     mask_color_id = 0
     for i in sorted_inds:
         bbox = boxes[i, :4]
@@ -147,15 +174,22 @@ def vis_one_image(
         if score < thresh:
             continue
 
-        print(dataset.classes[classes[i]], score)
+        #print(dataset.classes[classes[i]], score)
         # show box (off by default, box_alpha=0.0)
+        print("[Bbox matrix]", bbox)
+        
+        #BoundBox and Crop upper-body
         ax.add_patch(
             plt.Rectangle((bbox[0], bbox[1]),
-                          bbox[2] - bbox[0],
-                          bbox[3] - bbox[1],
-                          fill=False, edgecolor='g',
-                          linewidth=0.5, alpha=box_alpha))
-
+                          bbox[2] - bbox[0] ,
+                          (bbox[3] - bbox[1]) * 0.6,
+                          fill=False, edgecolor='r',
+                          linewidth=1, alpha=box_alpha))
+        
+        crop_magnifier_list.append(image_magnifier(crop_bbox(output_dir, output_name, im, bbox, dpi, i)))
+        
+        #Class and Accuracy visualizing
+        '''
         if show_class:
             ax.text(
                 bbox[0], bbox[1] - 2,
@@ -165,32 +199,50 @@ def vis_one_image(
                 bbox=dict(
                     facecolor='g', alpha=0.4, pad=0, edgecolor='none'),
                 color='white')
-
+        ''' 
+        #--------------------BBox End------------------------------#
+        
+        
+        # for segmenation area
         # show mask
         if segms is not None and len(segms) > i:
+            
+            threshold_inSeg = 0.7
+            
             img = np.ones(im.shape)
             color_mask = color_list[mask_color_id % len(color_list), 0:3]
             mask_color_id += 1
-
+            
+            #make mask and crop upper-body-mask
             w_ratio = .4
             for c in range(3):
                 color_mask[c] = color_mask[c] * (1 - w_ratio) + w_ratio
             for c in range(3):
                 img[:, :, c] = color_mask[c]
             e = masks[:, :, i]
-
+            
+            mask_magnifier_list.append(image_magnifier(crop_mask(output_dir, output_name, e, bbox, dpi, i)))
+            
             _, contour, hier = cv2.findContours(
                 e.copy(), cv2.RETR_CCOMP, cv2.CHAIN_APPROX_NONE)
-
+            
+            # fill in polygon.
             for c in contour:
+                
                 polygon = Polygon(
                     c.reshape((-1, 2)),
                     fill=True, facecolor=color_mask,
                     edgecolor='w', linewidth=1.2,
                     alpha=0.5)
+                
                 ax.add_patch(polygon)
+                
+             
+            
 
+        """
         # show keypoints
+        print("get keypoints : ", keypoints)
         if keypoints is not None and len(keypoints) > i:
             kps = keypoints[i]
             plt.autoscale(False)
@@ -238,7 +290,128 @@ def vis_one_image(
                 plt.setp(
                     line, color=colors[len(kp_lines) + 1], linewidth=1.0,
                     alpha=0.7)
-
-        output_name = os.path.basename(im_name) + '.' + ext
+        """
+        
+        print("[DEBUG] : output_name in vis python file")
         fig.savefig(os.path.join(output_dir, '{}'.format(output_name)), dpi=dpi)
+        #fig.savefig("/root/mask-rcnn.pytorch/test_output_image", dpi=dpi)
         plt.close('all')
+        
+        # needs two dataset.
+        gen = generates_segMatch_image(crop_magnifier_list, mask_magnifier_list)
+        canTrain_data = [] # if the result data can train, will be append to this array.
+        augmente_fromGen(output_dir, gen, dpi)
+
+        
+        
+"""
+Generates the multiple image with the mask.
+Note that we made complexible algorythm because Original Image has three channels but mask image has one.
+This method sequential runs a return data by generator.
+"""
+def generates_segMatch_image(cropped_list, masked_list):
+    magnifier_size = 32
+    OMEGA = []
+    threshold = None
+    
+    for i in range(0, len(cropped_list)):
+        for j in range(0, len(cropped_list[i])):
+            
+            matmul = np.zeros([magnifier_size,magnifier_size,3])
+            for z in range(0, 3):
+                matmul[:,:,z] = cropped_list[i][j][:, :, z] * masked_list[i][j]
+            
+
+            if np.sum(matmul) != 0:
+                #print(cropped_list[i][j])
+                yield cropped_list[i][j]
+
+            #yield cropped_list[i][j] # if you want to crop with non-condition.
+
+            
+def augmente_fromGen(output_dir, gen, dpi, save_toggle=True):
+    #mat = next(gen)
+    generates_dir = "generates_data"
+    output_dir = os.path.join(output_dir, generates_dir)
+    if os.path.isdir(output_dir) == False:
+        os.mkdir(output_dir)
+    
+    index = 0
+    for mat in gen:
+        mat_fig = plt.figure(frameon=True)
+        mat_fig.set_size_inches(mat.shape[1] / dpi, mat.shape[0] / dpi )
+        ax_mat = plt.Axes(mat_fig, [0.,0.,1.,1.])
+        ax_mat.axis('off')
+        mat_fig.add_axes(ax_mat)
+        ax_mat.imshow(mat)
+        mat_fig.savefig(os.path.join(output_dir, "{}_{}.jpg".format('mask_Condition', index)), dpi=dpi)
+        
+        index += 1
+
+
+"""
+You can take a bounding box or mask image from below a functions.
+If you do not want to crop, let you do adjust save_toggle to False.
+"""
+def crop_bbox(output_dir, output_name, im, bbox, dpi, index, save_toggle=True):
+    crop_image = im[int(bbox[1] + 50):int(bbox[1] + 50) + int( (bbox[3]-(bbox[1] + 50)) * 0.6 ), 
+                    int(bbox[0]):int(bbox[0]) + int(bbox[2] - bbox[0]),  :]
+    
+    print(crop_image.shape)
+    cropping_fig = plt.figure(frameon=True)
+    cropping_fig.set_size_inches(crop_image.shape[1] / dpi, crop_image.shape[0] / dpi )
+    ax2 = plt.Axes(cropping_fig, [0.,0.,1.,1.])
+    ax2.axis('off')
+    cropping_fig.add_axes(ax2)
+    ax2.imshow(crop_image)
+    
+    if save_toggle == True:
+        cropping_fig.savefig(os.path.join(output_dir, '{}_{}_{}'.format( "upper_crop", index, output_name)), dpi=dpi)
+        return crop_image
+    else:
+        return crop_image
+    
+def crop_mask(output_dir, output_name, mask, bbox, dpi, index, save_toggle=True):
+    #upper-body crop at the mask
+    crop_mask = mask[int(bbox[1] + 50):int(bbox[1] + 50) + int( (bbox[3]-(bbox[1] + 50)) * 0.6 ), 
+                int(bbox[0]):int(bbox[0]) + int(bbox[2] - bbox[0])]
+
+    print(crop_mask.shape)
+    # I want to crop in segment area
+    # there is a method in this way.
+    # you can save mask images.
+    mask_fig = plt.figure(frameon=True)
+    mask_fig.set_size_inches(crop_mask.shape[1] / dpi, crop_mask.shape[0] / dpi )
+    ax_mask = plt.Axes(mask_fig, [0.,0.,1.,1.])
+    ax_mask.axis('off')
+    mask_fig.add_axes(ax_mask)
+    ax_mask.imshow(crop_mask)
+    
+    if save_toggle == True:
+        mask_fig.savefig(os.path.join(output_dir, '{}_{}_{}'.format( "upper_mask_crop", index, output_name)), dpi=dpi)
+        return crop_mask
+    else:
+        return crop_mask
+    
+def image_magnifier(im): 
+    
+    magnifier_list = []
+    shape = im.shape
+    magnifier_size = 32
+    #print(shape)
+    
+    # shift to direction of y axis.
+    for y in range(0, shape[1]):
+        bottom = y + magnifier_size    
+        # shift to direction of x axis.
+        for x in range(0, shape[0]):
+            
+            value = im[x:x+magnifier_size, y:bottom]
+            #print(value)
+            if value.shape[0] == magnifier_size:
+                magnifier_list.append(value)
+                
+        if value.shape[1] == magnifier_size:
+            magnifier_list.append(value)
+    
+    return magnifier_list

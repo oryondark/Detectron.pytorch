@@ -24,7 +24,6 @@ from __future__ import unicode_literals
 
 from utils.collections import AttrDict
 
-
 def get_coco_dataset():
     """A dummy COCO dataset that includes only the 'classes' field."""
     ds = AttrDict()

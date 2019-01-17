@@ -185,7 +185,6 @@ def im_detect_bbox(model, im, target_scale, target_max_size, boxes=None):
         # Map scores and predictions back to the original set of boxes
         scores = scores[inv_index, :]
         pred_boxes = pred_boxes[inv_index, :]
-
     return scores, pred_boxes, im_scale, return_dict['blob_conv']
 
 
